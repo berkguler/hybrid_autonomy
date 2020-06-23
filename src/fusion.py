@@ -19,7 +19,7 @@ from sensor_msgs.msg import LaserScan
 from tf import TransformListener
 
 class TagClass:
-	def __init__(self,ID,x_tag,y_tag,x_box,y_box,yaw,circle):
+	def __init__(self,ID,x_tag,y_tag,x_box,y_box,circle,yaw):
 		self.ID = ID
 		self.x_tag = x_tag
 		self.y_tag = y_tag
@@ -86,7 +86,7 @@ class TagMatcher:
 			rospy.loginfo("Goal Execution Done!")
 
 	def walk(self):
-		waypoints = [(-0.70,-1.65,0),(3,3.70,3.13),(1,-1.86,3.13),(1.45,3.05,0),(0,0,0)]
+		waypoints = [(-0.70,-1.65,0),(3,3.6,3.135),(1,-1.86,3.13),(1.45,3.1,-0.05),(0,0,0)]
 		front = 0
 		for point in waypoints:
 			self.random_walk(point)
@@ -97,15 +97,15 @@ class TagMatcher:
 				self.moveforward(-front)
 				self.Fusion()
 				yaw = self.getHuskyPose()[3][2]
-				self.rotateccw(yaw+0.45)
+				self.rotateccw(yaw+0.4)
 				laser = self.laser_classification()
-				distance = min(min(laser['fleft'],laser['fright']),laser['front']) 
+				front = min(min(laser['fleft'],laser['fright']),laser['front']) -0.2
 				self.moveforward(front)
 				self.moveforward(-front)
 				self.Fusion()
-				self.rotateccw(yaw-0.45)
+				self.rotateccw(yaw-0.4)
 				laser = self.laser_classification()
-				distance = min(min(laser['fleft'],laser['fright']),laser['front'])
+				front = min(min(laser['fleft'],laser['fright']),laser['front'])-0.2
 				self.moveforward(front)
 				self.moveforward(-front)
 				self.Fusion()
@@ -124,26 +124,35 @@ class TagMatcher:
 		initial_range = laser_msg.ranges[360]
 		if (distance > 0 and initial_range > distance) or distance < 0: 
 			print distance
-			while round(((laser_msg.ranges[360] - initial_range)+distance),1)!= 0:
+			while round(((laser_msg.ranges[360] - initial_range)+distance),1) != 0:
 				#print("%.2f ---> %.2f"%(-1*distance,(laser_msg.ranges[360] - initial_range)))
 				if distance < 0 and self.is_mf_blocked:
 					self.is_mf_blocked = False
+					rospy.loginfo("It was Blocked")
 					break 
 				laser_msg = rospy.wait_for_message("/scan",LaserScan)
-				if min(laser_msg.ranges[144:575]) < 0.1:
+				if min(laser_msg.ranges[260:460]) < 0.1:
 					self.is_mf_blocked = True
+					rospy.loginfo("Blocked")
 					break
 				else:
 					self.is_mf_blocked = False
 				linear_speed = (distance+(laser_msg.ranges[360] - initial_range))
+				
 				if distance > 0 and linear_speed < 0:
+					rospy.loginfo("Blocked inverse speed v:" + str(linear_speed) + " d:" + str(distance))
+					print("Initial: %.2f Front: %.2f LR: %.2f distance: %.2f speed: %.2f"%(initial_range,laser_msg.ranges[360],min(laser_msg.ranges[260:460]),distance,linear_speed))
 					linear_speed = 0
 					self.is_mf_blocked = True
+					
 					break
 				elif distance < 0 and linear_speed > 0:
+					rospy.loginfo("Blocked inverse speed v:" + str(linear_speed) + " d:" + str(distance))
+					print("Initial: %.2f Front: %.2f LR: %.2f distance: %.2f speed: %.2f"%(initial_range,laser_msg.ranges[360],min(laser_msg.ranges[260:460]),distance,linear_speed))
 					linear_speed = 0
 					self.is_mf_blocked = True
 					break
+				print("Initial: %.2f Front: %.2f LR: %.2f distance: %.2f speed: %.2f"%(initial_range,laser_msg.ranges[360],min(laser_msg.ranges[260:460]),distance,linear_speed))
 				speed.linear.x = linear_speed
 				speed.angular.z = rotation
 				self.move.publish(speed)
@@ -223,14 +232,14 @@ class TagMatcher:
 		try:
 			rospy.sleep(1.0)
 			(trans,rot) = self.tf.lookupTransform('/map', '/base_footprint', rospy.Time(0))
-			print("%s\tHusky\t%s"%("------------","---------------"))
+			# print("%s\tHusky\t%s"%("------------","---------------"))
 			homo_matrix = tf.transformations.quaternion_matrix(rot)
 			homo_matrix[0][3] = trans[0]
 			homo_matrix[1][3] = trans[1]
 			homo_matrix[2][3] = trans[2]
-			print(homo_matrix)
+			# print(homo_matrix)
 			yaw = tf.transformations.euler_from_quaternion(rot)
-			print("%s\tHusky\t%s"%("------------","---------------"))
+			# print("%s\tHusky\t%s"%("------------","---------------"))
 			return (trans,rot,homo_matrix,yaw)
 		except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
 			print("Error Occured! - Detection of Husky Pose wrt map frame")		
@@ -245,9 +254,9 @@ class TagMatcher:
 			homo_matrix[0][3] = new_trans[0]
 			homo_matrix[1][3] = new_trans[1]
 			homo_matrix[2][3] = new_trans[2]
-			print("%s\tTag\t%s"%("------------","---------------"))
-			print(homo_matrix)
-			print("%s\tTag\t%s"%("------------","---------------"))
+			# print("%s\tTag\t%s"%("------------","---------------"))
+			# print(homo_matrix)
+			# print("%s\tTag\t%s"%("------------","---------------"))
 			return (new_trans,new_rot,homo_matrix)
 		except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
 			print("Error Occured! - Detection of Tag Pose wrt base_footprint frame")	
@@ -258,9 +267,9 @@ class TagMatcher:
 		# result[0][3] += tag_offset[0]
 		# result[1][3] += tag_offset[1]
 		# result[2][3] += tag_offset[2]
-		print("%s\tMapper\t%s"%("------------","---------------"))
-		print(result)
-		print("%s\tMapper\t%s"%("------------","---------------"))
+		# print("%s\tMapper\t%s"%("------------","---------------"))
+		# print(result)
+		# print("%s\tMapper\t%s"%("------------","---------------"))
 		return result
 
 def movebase_client(target_goal):
@@ -308,16 +317,5 @@ if __name__ == '__main__':
 	matcher.explore_n_catch()
 	for tag_message in matcher.readedmarkers_tf:
 		tag_message.display()	
-	# while True:
-	# 	vision(False)
-	# 	choice = raw_input("Press any key to continue ...")
-	# 	if choice == "f":
-	# 		vision(True)
-	# 		matcher.Fusion()
-	# 	elif choice == "r":	
-	# 		for tag_message in matcher.readedmarkers_tf:
-	# 			tag_message.display()
-	# 	elif choice == "x":
-	# 		break
 	choice2 = raw_input("Press any key to continue ...")
 	matcher.move_robot_arm(0,0,0,0)
