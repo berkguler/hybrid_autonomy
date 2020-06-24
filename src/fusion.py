@@ -39,9 +39,8 @@ class TagMatcher:
 		self.shoulder = rospy.Publisher("/shoulder_joint_position_controller/command",Float64,queue_size=10)
 		self.elbow = rospy.Publisher("/elbow_joint_position_controller/command",Float64,queue_size=10)
 		self.wrist = rospy.Publisher("/wri_joint_position_controller/command",Float64,queue_size=10)
-		self.markerlist = []
-		self.readedmarkers = []
 		self.readedmarkers_tf = []
+		self.selectedmarkers = []
 		self.taglist = [0,1,2,3]
 		rospy.loginfo("TagMatcher Initalized!!!!!!")	
 
@@ -57,6 +56,8 @@ class TagMatcher:
 		self.walk()
 		vision(False)
 
+	def box_hunter(self,source,target):
+		rospy.loginfo(str(source) + " -> " + str(target))
 
 
 	def laser_classification(self):
@@ -232,11 +233,22 @@ class TagMatcher:
 					# 	text = ("%s %d %s\nTag:\t%.2f\t%.2f\nBox:\t%.2f\t%.2f\nCircle:\t%.2f\tYaw:\t%.2f"%("--------------------",T_msg.markers[i].id,"--------------------",self.tag_trans[0],self.tag_trans[1],box_x,box_y,circle,box_euler[2]))
 					# 	print(text)
 
-				if not T_msg.markers[i].id in self.readedmarkers:
-					self.readedmarkers.append(T_msg.markers[i].id)
 					rospy.loginfo(str(T_msg.markers[i].id) + " is readed ...")
 				self.readedmarkers_tf.append(TagClass(T_msg.markers[i].id,self.tag_trans[0],self.tag_trans[1],near_box[0],near_box[1],near_box[2],near_box[3]))
 
+	def select_best_pose(self):
+		self.readedmarkers = []
+		for tag in self.readedmarkers_tf:
+			if tag.ID not in readedmarkers:
+				self.readedmarkers.append(tag.ID)
+				self.selectedmarkers.append(tag)
+			else:
+				index = self.readedmarkers.index(tag.ID)
+				old_tag = self.selectedmarkers[index]
+				if tag.circle < old_tag.circle:
+					self.selectedmarkers[index] = tag
+		return self.selectedmarkers
+			
 	def Rotation(self,translation,orientation):
 		self.rotation_matrix =  np.array([1,0,0,0,0,1,0,-1,0]).reshape(3,3) #-90 degree about the x axis
 		self.converted_trans = np.dot(self.rotation_matrix,np.asarray(translation).reshape(3,1))
@@ -327,11 +339,24 @@ if __name__ == '__main__':
 	rospy.init_node("fusion")
 	r = rospy.Rate(5)
 	matcher = TagMatcher()
-	choice = raw_input("Press any key to continue ...")
+	raw_input("Press any key to continue ...")
 	matcher.move_robot_arm(0,1,0.5,2)
 	matcher.calibrate_dance()
 	matcher.explore_n_catch()
 	for tag_message in matcher.readedmarkers_tf:
 		tag_message.display()	
-	choice2 = raw_input("Press any key to continue ...")
+	matcher.select_best_pose()
+	rospy.loginfo("Readed tags were selected wrt circle value")
+	for tag_message in matcher.selectedmarkers:
+		tag_message.display()
+	print("Available markers: ")
+	print matcher.readedmarkers
+	choice = raw_input("Press x to exit, any key to continue...")
+	if choice != "x" or choice!= "X":
+		source_tag = int(raw_input("Select the source box from list: "))
+		target_tag = int(raw_input("Select the target box from list: "))
+		if not source_tag in matcher.readedmarkers and not target_tag in matcher.readedmarkers:
+			print("Wrong Selection")
+		else:
+			matcher.box_hunter(source_tag,target_tag)
 	matcher.move_robot_arm(0,0,0,0)
