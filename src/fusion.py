@@ -86,8 +86,9 @@ class TagMatcher:
 			rospy.loginfo("Goal Execution Done!")
 
 	def walk(self):
-		waypoints = [(-0.70,-1.65,0),(3,3.6,3.135),(1,-1.86,3.13),(1.45,3.1,-0.05),(0,0,0)]
+		waypoints = [(-0.50,-1.65,0),(3,3.6,3.1399),(1,-1.86,3.13),(1.45,3,-0.05),(0,0,0)]
 		front = 0
+		self.is_mf_blocked = False
 		for point in waypoints:
 			self.random_walk(point)
 			if point != waypoints[len(waypoints)-1]:
@@ -97,13 +98,13 @@ class TagMatcher:
 				self.moveforward(-front)
 				self.Fusion()
 				yaw = self.getHuskyPose()[3][2]
-				self.rotateccw(yaw+0.4)
+				self.rotateccw(yaw+0.3)
 				laser = self.laser_classification()
 				front = min(min(laser['fleft'],laser['fright']),laser['front']) -0.2
 				self.moveforward(front)
 				self.moveforward(-front)
 				self.Fusion()
-				self.rotateccw(yaw-0.4)
+				self.rotateccw(yaw-0.3)
 				laser = self.laser_classification()
 				front = min(min(laser['fleft'],laser['fright']),laser['front'])-0.2
 				self.moveforward(front)
@@ -119,25 +120,39 @@ class TagMatcher:
 		self.moveforward(-2)
 		
 	def moveforward(self,distance,rotation=0.0):
+		rospy.sleep(0.5)
 		speed = Twist()
 		laser_msg = rospy.wait_for_message("/scan",LaserScan)
 		initial_range = laser_msg.ranges[360]
+		last_range = initial_range
+		replacement = 0
 		if (distance > 0 and initial_range > distance) or distance < 0: 
-			print distance
+			print "Target: " + str(distance)
 			while round(((laser_msg.ranges[360] - initial_range)+distance),1) != 0:
 				#print("%.2f ---> %.2f"%(-1*distance,(laser_msg.ranges[360] - initial_range)))
-				if distance < 0 and self.is_mf_blocked:
-					self.is_mf_blocked = False
-					rospy.loginfo("It was Blocked")
-					break 
 				laser_msg = rospy.wait_for_message("/scan",LaserScan)
-				if min(laser_msg.ranges[260:460]) < 0.1:
+				linear_speed = (distance+(laser_msg.ranges[360] - initial_range))
+
+				if abs(last_range - laser_msg.ranges[360]) >= 0.2:	
+					rospy.loginfo("Blocked 0.2 linearization error old:" + str(last_range) + " new:" + str(laser_msg.ranges[360]))
+					replacement = -initial_range + last_range
+					self.moveforward(replacement)
+					rospy.loginfo("REVERSE")
 					self.is_mf_blocked = True
-					rospy.loginfo("Blocked")
+					break
+				if distance < 0 and self.is_mf_blocked:
+					rospy.loginfo("It was Blocked")
+					self.is_mf_blocked = False
+					break 
+				if min(laser_msg.ranges[260:460]) < 0.1:
+					rospy.loginfo("Blocked 260-460  <0.1 ")
+					replacement = -initial_range + last_range
+					self.moveforward(replacement)
+					rospy.loginfo("REVERSE")
+					self.is_mf_blocked = True
 					break
 				else:
 					self.is_mf_blocked = False
-				linear_speed = (distance+(laser_msg.ranges[360] - initial_range))
 				
 				if distance > 0 and linear_speed < 0:
 					rospy.loginfo("Blocked inverse speed v:" + str(linear_speed) + " d:" + str(distance))
@@ -153,6 +168,7 @@ class TagMatcher:
 					self.is_mf_blocked = True
 					break
 				print("Initial: %.2f Front: %.2f LR: %.2f distance: %.2f speed: %.2f"%(initial_range,laser_msg.ranges[360],min(laser_msg.ranges[260:460]),distance,linear_speed))
+				last_range = laser_msg.ranges[360]
 				speed.linear.x = linear_speed
 				speed.angular.z = rotation
 				self.move.publish(speed)
