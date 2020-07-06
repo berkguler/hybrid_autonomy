@@ -41,8 +41,15 @@ class TagMatcher:
 		self.wrist = rospy.Publisher("/wri_joint_position_controller/command",Float64,queue_size=10)
 		self.readedmarkers_tf = []
 		self.selectedmarkers = []
-		self.taglist = [0,1,2,3]
+		self.is_mf_blocked = False
 		rospy.loginfo("TagMatcher Initalized!!!!!!")	
+
+	def debug(self):
+		self.readedmarkers_tf.append(TagClass(0,4.62,-2.11,4.69,-1.95,0.18,-0.02))
+		self.readedmarkers_tf.append(TagClass(1,4.94,2.21,4.94,2.33,0.11,0.00))
+		self.readedmarkers_tf.append(TagClass(2,-2.36,-2.39,-2.42,-2.45,0.10,-0.06))
+		self.readedmarkers_tf.append(TagClass(3,-2.07,3.25,-2.10,3.04,0.21,1.53))
+
 
 	def move_robot_arm(self,base_angle,elbow_angle,shoulder_angle,wrist_angle):
 		self.base.publish(base_angle)
@@ -54,11 +61,15 @@ class TagMatcher:
 		rospy.sleep(0.5)
 		vision(True)
 		self.walk()
-		vision(False)
 
 	def box_hunter(self,source,target):
 		rospy.loginfo(str(source) + " -> " + str(target))
+		self.approach(source)
 
+		# pick
+		self.approach(target)
+		
+		#place
 
 	def laser_classification(self):
 		msg = rospy.wait_for_message("/scan",LaserScan)
@@ -205,6 +216,102 @@ class TagMatcher:
 		T_msg = rospy.wait_for_message("/ar_pose_marker",AlvarMarkers,timeout=None)
 		return L_msg, T_msg
 
+	def approach(self,_ID):
+		rospy.loginfo("Destination: " + str(_ID))
+		""" Move_Base"""
+		print("Move Base")
+		index = self.readedmarkers.index(_ID)
+		tag = self.selectedmarkers[index]
+		x = 0.0
+		y = 0.0
+		yaw = 0.0
+		print("Before: x = %.2f y = %.2f yaw = %.2f "%(tag.x_box,tag.y_box,tag.yaw))
+		if tag.x_box > 0:
+			x = tag.x_box - 2.42
+			y = tag.y_box 
+			yaw = tag.yaw
+			if yaw >= 1 and yaw <= 2:
+				yaw = yaw-1.57
+			elif yaw <= -1 and yaw >= -2:
+				yaw = yaw + 1.57
+			elif yaw >= 2 and yaw <= 3.15:
+				yaw = yaw - 3.14
+			elif yaw <= -2 and yaw >= -3.15:
+				yaw = yaw + 3.14
+		else:
+			x = tag.x_box + 2.42
+			y = tag.y_box 
+			yaw = tag.yaw
+			if yaw >= 1 and yaw <= 2:
+				yaw = yaw+1.57
+			elif yaw <= -1 and yaw >= -2:
+				yaw = yaw - 1.57
+			elif yaw >= 2 and yaw <= 3.15:
+				yaw = yaw + 3.14
+			elif yaw <= -2 and yaw >= -3.15:
+				yaw = yaw - 3.14
+		print("After: x = %.2f y = %.2f yaw = %.2f "%(x,y,yaw))
+		self.random_walk((x,y,yaw))
+		"""" Traditional """
+		print("Traditional")
+		rospy.sleep(0.5)
+		r = rospy.Rate(5)
+		speed = Twist()
+		L_msg, T_msg = self.getMessages()
+		if len(T_msg.markers) >= 1:
+			for i in range(0,len(T_msg.markers)):
+				if T_msg.markers[i].id == _ID: 
+					while not len(T_msg.markers)  < 1:
+						T_msg = self.getMessages()[1]
+						if len(T_msg.markers)  < 1:
+							print "Out of the vision"
+							break
+						#Can see the tag
+						old_quaternion = (
+									T_msg.markers[i].pose.pose.orientation.x,
+									T_msg.markers[i].pose.pose.orientation.y,
+									T_msg.markers[i].pose.pose.orientation.z,
+									T_msg.markers[i].pose.pose.orientation.w )
+						old_offset = (
+							T_msg.markers[i].pose.pose.position.x,
+							T_msg.markers[i].pose.pose.position.y,
+							T_msg.markers[i].pose.pose.position.z )
+						new_translation, new_quaternion =  self.Rotation(old_offset,old_quaternion)
+						speed.linear.x = new_translation[0]/10
+						speed.angular.z = math.sqrt(math.pow(new_translation[0],2) + math.pow(new_translation[1],2))*new_translation[1]*2
+						print speed
+						self.move.publish(speed)
+						r.sleep()
+					rospy.loginfo("Manual Approaching ...")
+					#camera cannot see If it doesn't work we can continue with datmo
+					laser_msg = rospy.wait_for_message("/scan",LaserScan)
+					front = min(laser_msg.ranges[350:370])
+					while front > 0.105:
+						print front
+						laser_msg = rospy.wait_for_message("/scan",LaserScan)
+						front = min(laser_msg.ranges[350:370])
+						speed.linear.x = front/5
+						speed.angular.z = 0
+						#print speed
+						self.move.publish(speed)
+						r.sleep()
+					rospy.loginfo("!!! Done !!!")
+					rospy.sleep(1.0)
+					matcher.move_robot_arm(0,-1.2,0.5,2)
+					rospy.sleep(0.5)
+					matcher.move_robot_arm(0.1,-1.2,-0.5,2)
+					rospy.sleep(0.5)
+					matcher.move_robot_arm(-0.1,-1.2,0.5,2)
+					rospy.sleep(0.5)
+					matcher.move_robot_arm(0.1,-1.2,-0.5,2)
+					rospy.sleep(0.5)
+					matcher.move_robot_arm(-0.1,-1.2,0.5,2)
+					rospy.sleep(5.0)
+					matcher.move_robot_arm(0,1,0.5,2)
+					self.moveforward(-2)
+		
+
+
 	def Fusion(self):
 		rospy.loginfo("Fusion!!!")
 		L_msg, T_msg = self.getMessages()
@@ -229,17 +336,16 @@ class TagMatcher:
 					circle = math.sqrt(math.pow(self.tag_trans[0] - box_x,2)+math.pow(self.tag_trans[1] - box_y,2))
 					if near_box[2] > circle:
 						near_box = (box_x,box_y,circle,box_euler[2])
-					# if circle < 10:
+					# if circle < 1:
 					# 	text = ("%s %d %s\nTag:\t%.2f\t%.2f\nBox:\t%.2f\t%.2f\nCircle:\t%.2f\tYaw:\t%.2f"%("--------------------",T_msg.markers[i].id,"--------------------",self.tag_trans[0],self.tag_trans[1],box_x,box_y,circle,box_euler[2]))
 					# 	print(text)
-
 					rospy.loginfo(str(T_msg.markers[i].id) + " is readed ...")
 				self.readedmarkers_tf.append(TagClass(T_msg.markers[i].id,self.tag_trans[0],self.tag_trans[1],near_box[0],near_box[1],near_box[2],near_box[3]))
 
 	def select_best_pose(self):
 		self.readedmarkers = []
 		for tag in self.readedmarkers_tf:
-			if tag.ID not in readedmarkers:
+			if tag.ID not in self.readedmarkers:
 				self.readedmarkers.append(tag.ID)
 				self.selectedmarkers.append(tag)
 			else:
@@ -315,23 +421,35 @@ def movebase_client(target_goal):
 	else:
 		return client.get_result()
 
-def vision(status):
-	if status:
-		launch_datmo.start()
-		rospy.loginfo("Datmo is online")
-		launch_ar.start()
-		rospy.loginfo("AR Track Alvar is online")
+def vision(status,from_basefootprint=False):
+	if not from_basefootprint:
+		if status:
+			launch_datmo.start()
+			rospy.loginfo("Datmo is online")
+			launch_ar.start()
+			rospy.loginfo("AR Track Alvar is online")
+		else:
+			launch_datmo.shutdown()
+			rospy.loginfo("Datmo is offline")
+			launch_ar.shutdown()
+			rospy.loginfo("AR Track Alvar is offline")
 	else:
-		launch_datmo.shutdown()
-		rospy.loginfo("Datmo is offline")
-		launch_ar.shutdown()
-		rospy.loginfo("AR Track Alvar is offline")
+		if status:
+			launch_datmo_bf.start()
+			rospy.loginfo("Datmo from base_footprint is online")
+		else:
+			launch_datmo_bf.shutdown()
+			rospy.loginfo("Datmo from base_footprint is offline")
+	
 
 uuid_datmo = roslaunch.rlutil.get_or_generate_uuid(None,False)
+uuid_datmo_bf = roslaunch.rlutil.get_or_generate_uuid(None,False)
 uuid_ar = roslaunch.rlutil.get_or_generate_uuid(None,False)
 roslaunch.configure_logging(uuid_datmo)
+roslaunch.configure_logging(uuid_datmo_bf)
 roslaunch.configure_logging(uuid_ar)
 launch_datmo = roslaunch.parent.ROSLaunchParent(uuid_datmo,["/home/grid/husky_ws/src/datmo/launch/datmo.launch"])
+launch_datmo_bf = roslaunch.parent.ROSLaunchParent(uuid_datmo_bf,["/home/grid/husky_ws/src/datmo/launch/datmo_bf.launch"])
 launch_ar = roslaunch.parent.ROSLaunchParent(uuid_ar,["/home/grid/husky_ws/src/ar_track_alvar/ar_track_alvar/launch/husky_track.launch"])
 
 if __name__ == '__main__':
@@ -339,16 +457,19 @@ if __name__ == '__main__':
 	rospy.init_node("fusion")
 	r = rospy.Rate(5)
 	matcher = TagMatcher()
-	raw_input("Press any key to continue ...")
+	choice = raw_input("Press e to recognize the tags, any key to debug ...")
 	matcher.move_robot_arm(0,1,0.5,2)
 	matcher.calibrate_dance()
-	matcher.explore_n_catch()
+	if choice == "e" or choice == "E":	
+		matcher.explore_n_catch()
+	else:
+		matcher.debug()
 	for tag_message in matcher.readedmarkers_tf:
 		tag_message.display()	
 	matcher.select_best_pose()
 	rospy.loginfo("Readed tags were selected wrt circle value")
 	for tag_message in matcher.selectedmarkers:
-		tag_message.display()
+		tag_message.display()	
 	print("Available markers: ")
 	print matcher.readedmarkers
 	choice = raw_input("Press x to exit, any key to continue...")
@@ -358,5 +479,7 @@ if __name__ == '__main__':
 		if not source_tag in matcher.readedmarkers and not target_tag in matcher.readedmarkers:
 			print("Wrong Selection")
 		else:
+			vision(True)
 			matcher.box_hunter(source_tag,target_tag)
 	matcher.move_robot_arm(0,0,0,0)
+	raw_input("any key to exit...")
