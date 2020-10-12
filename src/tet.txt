@@ -1,0 +1,11 @@
+    
+""" D = sqrt(xc*xc+yc*yc)
+    H = zc
+    D_ = D - l[2]
+    H_ = H - h0
+    L = sqrt(D_*D_+H_*H_)
+    Z = (-L*L+l[1]*l[1]+l[2]*l[2])/(2*l[1]*l[2])
+    theta_3 = (-1*sqrt(1-Z*Z),Z)
+    phi = atan2(H_,D_)
+    theta_2 = pi/2 - (acos((L*L+l[1]*l[1]+l[2]*l[2])/(2*L*l[1]))+phi)
+    theta_4 = -(theta_2 + theta_3) """

@@ -63,6 +63,7 @@ class TagMatcher:
 		self.walk()
 
 	def box_hunter(self,source,target):
+		vision(True,True)
 		rospy.loginfo(str(source) + " -> " + str(target))
 		self.approach(source)
 
@@ -70,6 +71,9 @@ class TagMatcher:
 		self.approach(target)
 		
 		#place
+		vision(False,True)
+		self.random_walk((0,0,0))
+
 
 	def laser_classification(self):
 		msg = rospy.wait_for_message("/scan",LaserScan)
@@ -144,7 +148,6 @@ class TagMatcher:
 				#print("%.2f ---> %.2f"%(-1*distance,(laser_msg.ranges[360] - initial_range)))
 				laser_msg = rospy.wait_for_message("/scan",LaserScan)
 				linear_speed = (distance+(laser_msg.ranges[360] - initial_range))
-
 				if abs(last_range - laser_msg.ranges[360]) >= 0.2:	
 					rospy.loginfo("Blocked 0.2 linearization error old:" + str(last_range) + " new:" + str(laser_msg.ranges[360]))
 					replacement = -initial_range + last_range
@@ -263,6 +266,7 @@ class TagMatcher:
 				if T_msg.markers[i].id == _ID: 
 					while not len(T_msg.markers)  < 1:
 						T_msg = self.getMessages()[1]
+						#box_x = L_msg.tracks[k].odom.pose.pose.position.x
 						if len(T_msg.markers)  < 1:
 							print "Out of the vision"
 							break
@@ -277,8 +281,16 @@ class TagMatcher:
 							T_msg.markers[i].pose.pose.position.y,
 							T_msg.markers[i].pose.pose.position.z )
 						new_translation, new_quaternion =  self.Rotation(old_offset,old_quaternion)
-						speed.linear.x = new_translation[0]/10
-						speed.angular.z = math.sqrt(math.pow(new_translation[0],2) + math.pow(new_translation[1],2))*new_translation[1]*2
+
+						#(roll, pitch, yaw_tag) = euler_from_quaternion(new_quaternion)
+						heading = math.atan2(new_translation[1],new_translation[0])	
+						print("Ben headingim : %.4f"%heading)
+						if abs(heading) > 0.01:
+							speed.angular.z = heading + new_translation[1]
+							speed.linear.x = new_translation[0]/15
+						else:
+							speed.linear.x = new_translation[0]/10
+							speed.angular.z = 0
 						print speed
 						self.move.publish(speed)
 						r.sleep()
@@ -437,9 +449,13 @@ def vision(status,from_basefootprint=False):
 		if status:
 			launch_datmo_bf.start()
 			rospy.loginfo("Datmo from base_footprint is online")
+			launch_ar.start()
+			rospy.loginfo("AR Track Alvar is online")			
 		else:
 			launch_datmo_bf.shutdown()
 			rospy.loginfo("Datmo from base_footprint is offline")
+			launch_ar.shutdown()
+			rospy.loginfo("AR Track Alvar is offline")			
 	
 
 uuid_datmo = roslaunch.rlutil.get_or_generate_uuid(None,False)
@@ -479,7 +495,6 @@ if __name__ == '__main__':
 		if not source_tag in matcher.readedmarkers and not target_tag in matcher.readedmarkers:
 			print("Wrong Selection")
 		else:
-			vision(True)
 			matcher.box_hunter(source_tag,target_tag)
 	matcher.move_robot_arm(0,0,0,0)
 	raw_input("any key to exit...")
